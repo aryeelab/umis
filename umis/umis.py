@@ -244,6 +244,55 @@ def tagcount(sam, out, genemap, output_evidence_table, positional, minevidence,
 
     genes.to_csv(out)
 
+def read_multiple_alignments(track):
+    for k, g in itertools.groupby(track, lambda x: x.qname):
+        yield g
+
+@click.command()
+@click.argument('sam')
+def tcc(sam):
+    from pysam import AlignmentFile
+    from cStringIO import StringIO
+    import pandas as pd
+
+    logger.info('Reading optional files')
+
+    parser_re = re.compile('.*:CELL_(?P<CB>.*):UMI_(?P<MB>.*)')
+
+    logger.info('Tallying evidence')
+    start_tally = time.time()
+
+    evidence = collections.defaultdict(int)
+    from pysam import AlignmentFile
+    sam_mode = 'r' if sam.endswith(".sam") else 'rb'
+    sam_file = AlignmentFile(sam, mode=sam_mode)
+    track = sam_file.fetch(until_eof=True)
+
+    for group in read_multiple_alignments(track):
+        aln_tuples = []
+        for aln in group:
+            match = parser_re.match(aln.qname)
+            CB = match.group('CB')
+            MB = match.group('MB')
+            pos = aln.pos
+            txid = sam_file.getrname(aln.reference_id)
+            aln_tuples.append((txid, pos, CB, MB))
+            evidence[tuple(sorted(set(aln_tuples)))] += 1
+
+    buf = StringIO()
+    for key in evidence:
+        tcc = "|".join(sorted(set([x[0] for x in key])))
+        barcode = "|".join(sorted(set([x[2] for x in key])))
+        line = '{},{}\n'.format(tcc, barcode)
+        buf.write(line)
+
+    buf.seek(0)
+    evidence_table = pd.read_csv(buf)
+    evidence_table.columns=['tcc', 'cell']
+    collapsed = evidence_table.groupby(['tcc', 'cell']).size()
+    expanded = collapsed.unstack()
+    expanded.replace(pd.np.nan, 0, inplace=True)
+    expanded.to_csv(sys.stdout)
 
 @click.command()
 @click.argument('fastq', type=click.File('r'))
@@ -309,3 +358,4 @@ umis.add_command(fastqtransform)
 umis.add_command(tagcount)
 umis.add_command(cb_histogram)
 umis.add_command(cb_filter)
+umis.add_command(tcc)
