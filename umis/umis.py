@@ -10,6 +10,7 @@ import logging
 import time
 import multiprocessing
 from functools import partial
+import numpy as np
 import toolz as tz
 
 import click
